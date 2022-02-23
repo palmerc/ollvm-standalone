@@ -14,8 +14,17 @@
 #include "Flattening.h"
 
 #include <llvm/Transforms/Scalar.h>
+#include <llvm/IR/Function.h>
+#include <llvm/ADT/Statistic.h>
+#include <llvm/Transforms/Utils.h>
+#include <llvm/Transforms/Utils/Local.h> // For DemoteRegToStack and DemotePHIToStack
+#include <llvm/Transforms/IPO.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/CommandLine.h>
 
 #include "CryptoUtils.h"
+#include "Utils.h"
 
 #define DEBUG_TYPE "flattening"
 
@@ -127,7 +136,7 @@ bool Flattening::flatten(Function *f) {
   loopEntry = BasicBlock::Create(f->getContext(), "loopEntry", f, insert);
   loopEnd = BasicBlock::Create(f->getContext(), "loopEnd", f, insert);
 
-  load = new LoadInst(switchVar, "switchVar", loopEntry);
+  load = new LoadInst(switchVar->getAllocatedType(), switchVar, "switchVar", loopEntry);
 
   // Move first BB on top
   insert->moveBefore(loopEntry);

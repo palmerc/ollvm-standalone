@@ -91,6 +91,26 @@
 //===----------------------------------------------------------------------------------===//
 
 #include "BogusControlFlow.h"
+
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Type.h>
+#include <llvm/ADT/Statistic.h>
+#include <llvm/IR/GlobalValue.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/CodeGen/ISDOpcodes.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/Debug.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Transforms/IPO.h>
+
+#include "CryptoUtils.h"
 #include "Utils.h"
 
 // Stats
@@ -364,7 +384,7 @@ namespace {
         // insert some instructions
         if(i->isBinaryOp()){ // binary instructions
           unsigned opcode = i->getOpcode();
-          BinaryOperator *op, *op1 = NULL;
+          Instruction *op, *op1 = NULL;
           Twine *var = new Twine("_");
           // treat differently float or int
           // Binary int
@@ -404,7 +424,7 @@ namespace {
               switch(llvm::cryptoutils->get_range(3)){ // can be improved
                 case 0: //do nothing
                   break;
-                case 1: op = BinaryOperator::CreateFNeg(i->getOperand(0),*var,&*i);
+                case 1: op = UnaryOperator::CreateFNeg(i->getOperand(0),*var,&*i);
                         op1 = BinaryOperator::Create(Instruction::FAdd,op,
                             i->getOperand(1),"gen",&*i);
                         break;
@@ -528,7 +548,7 @@ namespace {
       for(Module::iterator mi = M.begin(), me = M.end(); mi != me; ++mi){
         for(Function::iterator fi = mi->begin(), fe = mi->end(); fi != fe; ++fi){
           //fi->setName("");
-          TerminatorInst * tbb= fi->getTerminator();
+          Instruction * tbb= fi->getTerminator();
           if(tbb->getOpcode() == Instruction::Br){
             BranchInst * br = (BranchInst *)(tbb);
             if(br->isConditional()){
@@ -554,8 +574,8 @@ namespace {
       // Replacing all the branches we found
       for(std::vector<Instruction*>::iterator i =toEdit.begin();i!=toEdit.end();++i){
         //if y < 10 || x*(x+1) % 2 == 0
-        opX = new LoadInst ((Value *)x, "", (*i));
-        opY = new LoadInst ((Value *)y, "", (*i));
+        opX = new LoadInst (x->getValueType(), (Value *)x, "", (*i));
+        opY = new LoadInst (y->getValueType(), (Value *)y, "", (*i));
 
         op = BinaryOperator::Create(Instruction::Sub, (Value *)opX,
             ConstantInt::get(Type::getInt32Ty(M.getContext()), 1,
