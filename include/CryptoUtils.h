@@ -40,6 +40,14 @@ extern ManagedStatic<CryptoUtils> cryptoutils;
 #define ENDIAN_32BITWORD
 #define UNALIGNED
 
+#elif defined(__arm__)
+
+#ifndef ENDIAN_LITTLE
+#define ENDIAN_LITTLE
+#endif
+#define ENDIAN_32BITWORD
+#define UNALIGNED
+
 #elif defined(__alpha)
 
 #ifndef ENDIAN_LITTLE
@@ -48,6 +56,14 @@ extern ManagedStatic<CryptoUtils> cryptoutils;
 #define ENDIAN_64BITWORD
 
 #elif defined(__x86_64__)
+
+#ifndef ENDIAN_LITTLE
+#define ENDIAN_LITTLE
+#endif
+#define ENDIAN_64BITWORD
+#define UNALIGNED
+
+#elif defined(__aarch64__)
 
 #ifndef ENDIAN_LITTLE
 #define ENDIAN_LITTLE
@@ -261,4 +277,3 @@ private:
 }
 
 #endif // LLVM_CryptoUtils_H
-
