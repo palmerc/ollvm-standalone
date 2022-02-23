@@ -16,14 +16,7 @@
 
 
 // LLVM include
-#include "llvm/Pass.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/Transforms/IPO.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/CryptoUtils.h"
+#include <llvm/Pass.h>
 
 // Namespace
 using namespace llvm;

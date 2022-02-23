@@ -18,7 +18,7 @@
 #ifndef LLVM_CryptoUtils_H
 #define LLVM_CryptoUtils_H
 
-#include "llvm/Support/ManagedStatic.h"
+#include <llvm/Support/ManagedStatic.h>
 
 #include <stdint.h>
 #include <cstdio>

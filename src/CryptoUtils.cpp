@@ -17,14 +17,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/ADT/Twine.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/CryptoUtils.h"
+#include "CryptoUtils.h"
+
+#include <llvm/Support/ManagedStatic.h>
+#include <llvm/Support/ErrorHandling.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/Debug.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/ADT/Twine.h>
+#include <llvm/ADT/Statistic.h>
 
 #include <fstream>
 #include <string>

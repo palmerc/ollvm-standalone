@@ -1,7 +1,9 @@
-#include "llvm/Transforms/Obfuscation/Utils.h"
-#include "llvm/Support/raw_ostream.h"
+#include "Utils.h"
+
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/IR/Module.h>
+
 #include <sstream>
-#include "llvm/IR/Module.h"
 
 // Shamefully borrowed from ../Scalar/RegToMem.cpp :(
 bool valueEscapes(Instruction *Inst) {
