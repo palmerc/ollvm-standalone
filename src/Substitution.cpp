@@ -14,32 +14,27 @@
 
 #include "Substitution.h"
 
+#include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
-#include <llvm/ADT/Statistic.h>
-#include <llvm/Transforms/IPO.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/CommandLine.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/Support/raw_ostream.h>
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/IPO.h>
 
 #include "CryptoUtils.h"
 #include "Utils.h"
 
 #define DEBUG_TYPE "substitution"
 
-#define NUMBER_ADD_SUBST 4
-#define NUMBER_SUB_SUBST 3
-#define NUMBER_AND_SUBST 2
-#define NUMBER_OR_SUBST 2
-#define NUMBER_XOR_SUBST 2
-
 static cl::opt<int>
-ObfTimes("sub_loop",
-         cl::desc("Choose how many time the -sub pass loops on a function"),
-         cl::value_desc("number of times"), cl::init(1), cl::Optional);
-
+    ObfTimes("sub_loop",
+             cl::desc("Choose how many time the -sub pass loops on a function"),
+             cl::value_desc("number of times"), cl::init(1), cl::Optional);
 
 // Stats
 STATISTIC(Add, "Add substitued");
@@ -52,82 +47,51 @@ STATISTIC(And, "And substitued");
 STATISTIC(Or, "Or substitued");
 STATISTIC(Xor, "Xor substitued");
 
-namespace {
-
-struct Substitution : public FunctionPass {
-  static char ID; // Pass identification, replacement for typeid
-  void (Substitution::*funcAdd[NUMBER_ADD_SUBST])(BinaryOperator *bo);
-  void (Substitution::*funcSub[NUMBER_SUB_SUBST])(BinaryOperator *bo);
-  void (Substitution::*funcAnd[NUMBER_AND_SUBST])(BinaryOperator *bo);
-  void (Substitution::*funcOr[NUMBER_OR_SUBST])(BinaryOperator *bo);
-  void (Substitution::*funcXor[NUMBER_XOR_SUBST])(BinaryOperator *bo);
-  bool flag;
-
-  Substitution() : FunctionPass(ID) {}
-
-  Substitution(bool flag) : FunctionPass(ID) {
-    this->flag = flag;
-    funcAdd[0] = &Substitution::addNeg;
-    funcAdd[1] = &Substitution::addDoubleNeg;
-    funcAdd[2] = &Substitution::addRand;
-    funcAdd[3] = &Substitution::addRand2;
-
-    funcSub[0] = &Substitution::subNeg;
-    funcSub[1] = &Substitution::subRand;
-    funcSub[2] = &Substitution::subRand2;
-
-    funcAnd[0] = &Substitution::andSubstitution;
-    funcAnd[1] = &Substitution::andSubstitutionRand;
-
-    funcOr[0] = &Substitution::orSubstitution;
-    funcOr[1] = &Substitution::orSubstitutionRand;
-
-    funcXor[0] = &Substitution::xorSubstitution;
-    funcXor[1] = &Substitution::xorSubstitutionRand;
-  }
-
-  bool runOnFunction(Function &F);
-  bool substitute(Function *f);
-
-  void addNeg(BinaryOperator *bo);
-  void addDoubleNeg(BinaryOperator *bo);
-  void addRand(BinaryOperator *bo);
-  void addRand2(BinaryOperator *bo);
-
-  void subNeg(BinaryOperator *bo);
-  void subRand(BinaryOperator *bo);
-  void subRand2(BinaryOperator *bo);
-
-  void andSubstitution(BinaryOperator *bo);
-  void andSubstitutionRand(BinaryOperator *bo);
-
-  void orSubstitution(BinaryOperator *bo);
-  void orSubstitutionRand(BinaryOperator *bo);
-
-  void xorSubstitution(BinaryOperator *bo);
-  void xorSubstitutionRand(BinaryOperator *bo);
+llvm::PassPluginLibraryInfo getFlatteningPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "sub", "v1.0", [](PassBuilder &PB) {
+            PB.registerPipelineParsingCallback(
+                [&](StringRef Name, FunctionPassManager &FPM,
+                    ArrayRef<PassBuilder::PipelineElement>) {
+                  if (Name == "sub") {
+                    FPM.addPass(Substitution());
+                    return true;
+                  }
+                  return false;
+                });
+          }};
 };
+
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
+llvmGetPassPluginInfo() {
+  return getFlatteningPluginInfo();
 }
 
-char Substitution::ID = 0;
-static RegisterPass<Substitution> X("substitution", "operators substitution");
-Pass *llvm::createSubstitution(bool flag) { return new Substitution(flag); }
+char SubstitutionLegacy::ID = 0;
+RegisterPass<SubstitutionLegacy>
+    SubstitutionLegacyX(/*PassArg=*/"legacy-sub",
+                        /*Name=*/"SubstitutionLegacy",
+                        /*CFGOnly=*/false,
+                        /*is_analysis=*/false);
+
+bool SubstitutionLegacy::runOnFunction(Function &F) {
+  return Impl.runOnFunction(F);
+}
+
+PreservedAnalyses Substitution::run(Function &F, FunctionAnalysisManager &FAM) {
+  bool changed = runOnFunction(F);
+  return (changed ? PreservedAnalyses::none() : PreservedAnalyses::all());
+}
 
 bool Substitution::runOnFunction(Function &F) {
-   // Check if the percentage is correct
-   if (ObfTimes <= 0) {
-     errs()<<"Substitution application number -sub_loop=x must be x > 0";
-	 return false;
-   }
+  // Check if the percentage is correct
+  if (ObfTimes <= 0) {
+    errs() << "Substitution application number -sub_loop=x must be x > 0";
+    return false;
+  }
 
   Function *tmp = &F;
   // Do we obfuscate
-  if (toObfuscate(flag, tmp, "sub")) {
-    substitute(tmp);
-	return true;
-  }
-
-  return false;
+  return substitute(tmp);
 }
 
 bool Substitution::substitute(Function *f) {
@@ -178,18 +142,18 @@ bool Substitution::substitute(Function *f) {
             //++Shi;
             break;
           case Instruction::And:
-            (this->*
-             funcAnd[llvm::cryptoutils->get_range(2)])(cast<BinaryOperator>(inst));
+            (this->*funcAnd[llvm::cryptoutils->get_range(2)])(
+                cast<BinaryOperator>(inst));
             ++And;
             break;
           case Instruction::Or:
-            (this->*
-             funcOr[llvm::cryptoutils->get_range(2)])(cast<BinaryOperator>(inst));
+            (this->*funcOr[llvm::cryptoutils->get_range(2)])(
+                cast<BinaryOperator>(inst));
             ++Or;
             break;
           case Instruction::Xor:
-            (this->*
-             funcXor[llvm::cryptoutils->get_range(2)])(cast<BinaryOperator>(inst));
+            (this->*funcXor[llvm::cryptoutils->get_range(2)])(
+                cast<BinaryOperator>(inst));
             ++Xor;
             break;
           default:
@@ -213,15 +177,15 @@ void Substitution::addNeg(BinaryOperator *bo) {
         BinaryOperator::Create(Instruction::Sub, bo->getOperand(0), op, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
 
     bo->replaceAllUsesWith(op);
-  }/* else {
-    op = BinaryOperator::CreateFNeg(bo->getOperand(1), "", bo);
-    op = BinaryOperator::Create(Instruction::FSub, bo->getOperand(0), op, "",
-                                bo);
-  }*/
+  } /* else {
+     op = BinaryOperator::CreateFNeg(bo->getOperand(1), "", bo);
+     op = BinaryOperator::Create(Instruction::FSub, bo->getOperand(0), op, "",
+                                 bo);
+   }*/
 }
 
 // Implementation of a = -(-b + (-c))
@@ -235,8 +199,8 @@ void Substitution::addDoubleNeg(BinaryOperator *bo) {
     op = BinaryOperator::CreateNeg(op, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
   } else {
     op = UnaryOperator::CreateFNeg(bo->getOperand(0), "", bo);
     op2 = UnaryOperator::CreateFNeg(bo->getOperand(1), "", bo);
@@ -262,8 +226,8 @@ void Substitution::addRand(BinaryOperator *bo) {
     op = BinaryOperator::Create(Instruction::Sub, op, co, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
 
     bo->replaceAllUsesWith(op);
   }
@@ -292,8 +256,8 @@ void Substitution::addRand2(BinaryOperator *bo) {
     op = BinaryOperator::Create(Instruction::Add, op, co, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
 
     bo->replaceAllUsesWith(op);
   }
@@ -317,8 +281,8 @@ void Substitution::subNeg(BinaryOperator *bo) {
         BinaryOperator::Create(Instruction::Add, bo->getOperand(0), op, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
   } else {
     op = UnaryOperator::CreateFNeg(bo->getOperand(1), "", bo);
     op = BinaryOperator::Create(Instruction::FAdd, bo->getOperand(0), op, "",
@@ -343,8 +307,8 @@ void Substitution::subRand(BinaryOperator *bo) {
     op = BinaryOperator::Create(Instruction::Sub, op, co, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
 
     bo->replaceAllUsesWith(op);
   }
@@ -373,8 +337,8 @@ void Substitution::subRand2(BinaryOperator *bo) {
     op = BinaryOperator::Create(Instruction::Add, op, co, "", bo);
 
     // Check signed wrap
-    //op->setHasNoSignedWrap(bo->hasNoSignedWrap());
-    //op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
+    // op->setHasNoSignedWrap(bo->hasNoSignedWrap());
+    // op->setHasNoUnsignedWrap(bo->hasNoUnsignedWrap());
 
     bo->replaceAllUsesWith(op);
   }
@@ -583,4 +547,3 @@ void Substitution::xorSubstitutionRand(BinaryOperator *bo) {
   op = BinaryOperator::Create(Instruction::Xor, op, op1, "", bo);
   bo->replaceAllUsesWith(op);
 }
-

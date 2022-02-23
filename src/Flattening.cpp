@@ -13,15 +13,16 @@
 
 #include "Flattening.h"
 
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/IR/Function.h>
 #include <llvm/ADT/Statistic.h>
-#include <llvm/Transforms/Utils.h>
-#include <llvm/Transforms/Utils/Local.h> // For DemoteRegToStack and DemotePHIToStack
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Scalar.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/CommandLine.h>
+#include <llvm/Transforms/Utils.h>
+#include <llvm/Transforms/Utils/Local.h> // For DemoteRegToStack and DemotePHIToStack
 
 #include "CryptoUtils.h"
 #include "Utils.h"
@@ -33,33 +34,51 @@ using namespace llvm;
 // Stats
 STATISTIC(Flattened, "Functions flattened");
 
-namespace {
-struct Flattening : public FunctionPass {
-  static char ID;  // Pass identification, replacement for typeid
-  bool flag;
-
-  Flattening() : FunctionPass(ID) {}
-  Flattening(bool flag) : FunctionPass(ID) { this->flag = flag; }
-
-  bool runOnFunction(Function &F);
-  bool flatten(Function *f);
+llvm::PassPluginLibraryInfo getFlatteningPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "flattening", "v1.0", [](PassBuilder &PB) {
+            PB.registerPipelineParsingCallback(
+                [&](StringRef Name, FunctionPassManager &FPM,
+                    ArrayRef<PassBuilder::PipelineElement>) {
+                  if (Name == "flattening") {
+                    FPM.addPass(Flattening());
+                    return true;
+                  }
+                  return false;
+                });
+          }};
 };
+
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
+llvmGetPassPluginInfo() {
+  return getFlatteningPluginInfo();
 }
 
-char Flattening::ID = 0;
-static RegisterPass<Flattening> X("flattening", "Call graph flattening");
-Pass *llvm::createFlattening(bool flag) { return new Flattening(flag); }
+char FlatteningLegacy::ID = 0;
+RegisterPass<FlatteningLegacy>
+    FlatteningLegacyX(/*PassArg=*/"legacy-flattening",
+                      /*Name=*/"FlatteningLegacy",
+                      /*CFGOnly=*/false,
+                      /*is_analysis=*/false);
+
+llvm::FunctionPass *createFlattening() { return new FlatteningLegacy(); }
+
+PreservedAnalyses Flattening::run(Function &F, FunctionAnalysisManager &FAM) {
+  bool changed = runOnFunction(F);
+  return (changed ? PreservedAnalyses::none() : PreservedAnalyses::all());
+}
 
 bool Flattening::runOnFunction(Function &F) {
   Function *tmp = &F;
   // Do we obfuscate
-  if (toObfuscate(flag, tmp, "fla")) {
-    if (flatten(tmp)) {
-      ++Flattened;
-    }
+  if (flatten(tmp)) {
+    ++Flattened;
   }
 
   return false;
+}
+
+bool FlatteningLegacy::runOnFunction(Function &F) {
+  return Impl.runOnFunction(F);
 }
 
 bool Flattening::flatten(Function *f) {
@@ -99,7 +118,7 @@ bool Flattening::flatten(Function *f) {
   origBB.erase(origBB.begin());
 
   // Get a pointer on the first BB
-  Function::iterator tmp = f->begin();  //++tmp;
+  Function::iterator tmp = f->begin(); //++tmp;
   BasicBlock *insert = &*tmp;
 
   // If main begin with an if
@@ -111,7 +130,7 @@ bool Flattening::flatten(Function *f) {
   if ((br != NULL && br->isConditional()) ||
       insert->getTerminator()->getNumSuccessors() > 1) {
     BasicBlock::iterator i = insert->end();
-	--i;
+    --i;
 
     if (insert->size() > 1) {
       --i;
@@ -136,7 +155,8 @@ bool Flattening::flatten(Function *f) {
   loopEntry = BasicBlock::Create(f->getContext(), "loopEntry", f, insert);
   loopEnd = BasicBlock::Create(f->getContext(), "loopEnd", f, insert);
 
-  load = new LoadInst(switchVar->getAllocatedType(), switchVar, "switchVar", loopEntry);
+  load = new LoadInst(switchVar->getAllocatedType(), switchVar, "switchVar",
+                      loopEntry);
 
   // Move first BB on top
   insert->moveBefore(loopEntry);

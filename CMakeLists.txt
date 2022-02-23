@@ -8,4 +8,5 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH};${CMAKE_CURRENT_LIST_DIR}/cmake)
 include(OLLVMStandalone)
 
 add_subdirectory(src)
+add_subdirectory(tools)
 

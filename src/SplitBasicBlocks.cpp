@@ -13,16 +13,18 @@
 
 #include "Split.h"
 
-#include <llvm/IR/BasicBlock.h>
 #include <llvm/ADT/Statistic.h>
-#include <llvm/Transforms/Utils/Local.h> // For DemoteRegToStack and DemotePHIToStack
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/PassPlugin.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/Scalar.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/CommandLine.h>
+#include <llvm/Transforms/Utils/Local.h> // For DemoteRegToStack and DemotePHIToStack
 
-#include "Utils.h"
 #include "CryptoUtils.h"
+#include "Utils.h"
 
 #define DEBUG_TYPE "split"
 
@@ -35,36 +37,44 @@ STATISTIC(Split, "Basicblock splitted");
 static cl::opt<int> SplitNum("split_num", cl::init(2),
                              cl::desc("Split <split_num> time each BB"));
 
-namespace {
-struct SplitBasicBlock : public FunctionPass {
-  static char ID; // Pass identification, replacement for typeid
-  bool flag;
-
-  SplitBasicBlock() : FunctionPass(ID) {}
-  SplitBasicBlock(bool flag) : FunctionPass(ID) {
-    
-    this->flag = flag;
-  }
-
-  bool runOnFunction(Function &F);
-  void split(Function *f);
-
-  bool containsPHI(BasicBlock *b);
-  void shuffle(std::vector<int> &vec);
+llvm::PassPluginLibraryInfo getFlatteningPluginInfo() {
+  return {LLVM_PLUGIN_API_VERSION, "split", "v1.0", [](PassBuilder &PB) {
+            PB.registerPipelineParsingCallback(
+                [&](StringRef Name, FunctionPassManager &FPM,
+                    ArrayRef<PassBuilder::PipelineElement>) {
+                  if (Name == "split") {
+                    FPM.addPass(SplitBasicBlock());
+                    return true;
+                  }
+                  return false;
+                });
+          }};
 };
+
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
+llvmGetPassPluginInfo() {
+  return getFlatteningPluginInfo();
 }
 
-char SplitBasicBlock::ID = 0;
-static RegisterPass<SplitBasicBlock> X("splitbbl", "BasicBlock splitting");
+char SplitBasicBlockLegacy::ID = 0;
+RegisterPass<SplitBasicBlockLegacy>
+    SplitLegacyX(/*PassArg=*/"legacy-split",
+                 /*Name=*/"SplitBasicBlockLegacy",
+                 /*CFGOnly=*/false,
+                 /*is_analysis=*/false);
 
-Pass *llvm::createSplitBasicBlock(bool flag) {
-  return new SplitBasicBlock(flag);
+FunctionPass *createSplitBasicBlock() { return new SplitBasicBlockLegacy(); }
+
+PreservedAnalyses SplitBasicBlock::run(Function &F,
+                                       FunctionAnalysisManager &FAM) {
+  bool changed = runOnFunction(F);
+  return (changed ? PreservedAnalyses::none() : PreservedAnalyses::all());
 }
 
 bool SplitBasicBlock::runOnFunction(Function &F) {
   // Check if the number of applications is correct
   if (!((SplitNum > 1) && (SplitNum <= 10))) {
-    errs()<<"Split application basic block percentage\
+    errs() << "Split application basic block percentage\
             -split_num=x must be 1 < x <= 10";
     return false;
   }
@@ -72,15 +82,17 @@ bool SplitBasicBlock::runOnFunction(Function &F) {
   Function *tmp = &F;
 
   // Do we obfuscate
-  if (toObfuscate(flag, tmp, "split")) {
-    split(tmp);
-    ++Split;
-  }
+  split(tmp);
+  ++Split;
 
   return false;
 }
 
-void SplitBasicBlock::split(Function *f) {
+bool SplitBasicBlockLegacy::runOnFunction(Function &F) {
+  return Impl.runOnFunction(F);
+}
+
+bool SplitBasicBlock::split(Function *f) {
   std::vector<BasicBlock *> origBB;
   int splitN = SplitNum;
 
@@ -126,13 +138,15 @@ void SplitBasicBlock::split(Function *f) {
         ++it;
       }
       last = test[i];
-      if(toSplit->size() < 2)
+      if (toSplit->size() < 2)
         continue;
       toSplit = toSplit->splitBasicBlock(it, toSplit->getName() + ".split");
     }
 
     ++Split;
   }
+
+  return Split > 0;
 }
 
 bool SplitBasicBlock::containsPHI(BasicBlock *b) {
@@ -150,4 +164,3 @@ void SplitBasicBlock::shuffle(std::vector<int> &vec) {
     std::swap(vec[i], vec[cryptoutils->get_uint32_t() % (i + 1)]);
   }
 }
-
